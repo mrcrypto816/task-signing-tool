@@ -126,7 +126,8 @@ export const formatBalanceDelta = (beforeHex: string, afterHex: string): string 
     const eth = formatEther(abs);
     return `${sign}${eth} ETH (${sign}${wei} wei)`;
   } catch {
-    return `${afterHex} - ${beforeHex}`;
+    // Fixed fallback order: show before - after (previously it returned after - before)
+    return `${beforeHex} - ${afterHex}`;
   }
 };
 
@@ -620,42 +621,4 @@ export const evaluateValidationEntry = (
       return assertNever(entry as never);
     }
   }
-};
-
-export interface StepInfo {
-  currentStep: number;
-  currentStepItems: number;
-  currentStepIndex: number;
-}
-
-export const getStepInfo = (
-  entry: ValidationNavEntry | undefined,
-  counts: StepCounts
-): StepInfo => {
-  if (!entry) {
-    return {
-      currentStep: 0,
-      currentStepItems: 0,
-      currentStepIndex: 0,
-    };
-  }
-
-  const definition = STEP_DEFINITION_MAP[entry.kind];
-  return {
-    currentStep: definition.order,
-    currentStepItems: counts[definition.itemsKey],
-    currentStepIndex: entry.index + 1,
-  };
-};
-
-export const getContractNameForEntry = (
-  entry: ValidationNavEntry | undefined,
-  items: ValidationItemsByStep
-): string => {
-  if (!entry) return 'Unknown Contract';
-
-  const definition = STEP_DEFINITION_MAP[entry.kind];
-  const stepItems = items[definition.itemsKey];
-  const item = stepItems[entry.index];
-  return item?.contractName ?? 'Unknown Contract';
 };
