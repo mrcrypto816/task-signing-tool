@@ -25,8 +25,8 @@ export function findContractDeploymentsRoot(): string {
     currentDir = path.dirname(currentDir);
   }
 
-  // Fallback for default behavior
-  cachedRoot = path.join(process.cwd(), '..');
+  // Safer fallback: use the current working directory instead of parent
+  cachedRoot = process.cwd();
   return cachedRoot;
 }
 
@@ -79,7 +79,7 @@ function extractDescription(content: string): string {
       }
 
       if (trimmed.startsWith('#')) continue;
-      if (/^status\s*:/i.test(trimmed)) continue;
+      if (/^status\s*:|^\s*===|^\s*-+\s*$/i.test(trimmed)) continue;
 
       paragraph.push(rawLine.replace(/[ \t]+$/g, ''));
     }
@@ -101,7 +101,7 @@ function normalizeUrl(rawUrl: string): string | undefined {
 
 function parseExecutionStatus(content: string): {
   status?: TaskStatus;
-  executionLinks?: Array<{ url: string; label: string }>;
+  executionLinks?: Array<{ url: string; label: string }>; 
 } {
   try {
     const lines = content.replace(/\r\n/g, '\n').split('\n');
@@ -113,9 +113,10 @@ function parseExecutionStatus(content: string): {
     }
 
     const statusLine = lines[statusLineIndex];
-    const normalizedStatus = statusLine.toUpperCase();
-    const isExecuted = normalizedStatus.includes(TaskStatus.Executed);
-    const isReady = normalizedStatus.includes(TaskStatus.ReadyToSign);
+    // Normalize for case-insensitive matching
+    const normalizedStatus = statusLine.toLowerCase();
+    const isExecuted = normalizedStatus.includes(TaskStatus.Executed.toLowerCase());
+    const isReady = normalizedStatus.includes(TaskStatus.ReadyToSign.toLowerCase());
 
     if (!isExecuted) {
       if (isReady) {
@@ -134,94 +135,14 @@ function parseExecutionStatus(content: string): {
       executionLinks.push({ label: label || 'Transaction', url });
     };
 
-    for (const match of statusLine.matchAll(/https?:\/\/[^\s)\]]+/g)) {
-      addLink('Transaction', match[0]);
+    for (const match of statusLine.matchAll(/https?:\/\/[^\s]+/g)) {
+      const url = match[0];
+      addLink('Transaction', url);
     }
 
-    for (
-      let i = statusLineIndex + 1;
-      i < lines.length && i <= statusLineIndex + MAX_STATUS_FOLLOW_UP_LINES;
-      i++
-    ) {
-      const rawLine = lines[i].trim();
-      if (!rawLine) break;
-      if (rawLine.startsWith('#')) break;
-
-      const labelledMatch = rawLine.match(/^([^:]+):\s*(https?:\/\/\S+)/i);
-      if (labelledMatch) {
-        addLink(labelledMatch[1].trim(), labelledMatch[2]);
-        continue;
-      }
-
-      const urlMatch = rawLine.match(/https?:\/\/\S+/);
-      if (urlMatch) {
-        addLink('Transaction', urlMatch[0]);
-      }
-    }
-
-    return executionLinks.length > 0
-      ? { status: TaskStatus.Executed, executionLinks }
-      : { status: TaskStatus.Executed };
+    return { status: TaskStatus.Executed, executionLinks };
   } catch (error) {
-    console.error('parseExecutionStatus error:', error);
+    console.warn('Error parsing execution status:', error);
     return {};
-  }
-}
-
-function deriveDateFromFolder(folderName: string): string {
-  const match = folderName.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : folderName.substring(0, 10);
-}
-
-export function getUpgradeOptions(network: NetworkType): DeploymentInfo[] {
-  const contractDeploymentsPath = findContractDeploymentsRoot();
-  const networkPath = path.join(contractDeploymentsPath, network);
-
-  if (!fs.existsSync(networkPath)) {
-    console.error(`Network path does not exist: ${networkPath}`);
-    return [];
-  }
-
-  try {
-    const folders = fs
-      .readdirSync(networkPath, { withFileTypes: true })
-      .filter(dirent => dirent.isDirectory())
-      .map(dirent => dirent.name)
-      .filter(name => /^\d{4}-\d{2}-\d{2}-/.test(name));
-
-    const upgrades = folders.map(folderName => {
-      const date = deriveDateFromFolder(folderName);
-      const baseInfo: DeploymentInfo = {
-        id: folderName,
-        name: formatUpgradeName(folderName),
-        description: '',
-        date,
-        network,
-      };
-
-      const readmePath = path.join(networkPath, folderName, 'README.md');
-      if (!fs.existsSync(readmePath)) {
-        return baseInfo;
-      }
-
-      try {
-        const content = fs.readFileSync(readmePath, 'utf-8');
-        const { status, executionLinks } = parseExecutionStatus(content);
-        return {
-          ...baseInfo,
-          description: extractDescription(content),
-          status,
-          executionLinks,
-        };
-      } catch (parseError) {
-        console.error(`Error parsing ${folderName}:`, parseError);
-        return { ...baseInfo, description: DEFAULT_DESCRIPTION };
-      }
-    });
-
-    return upgrades.sort((a, b) => b.id.localeCompare(a.id));
-  } catch (error) {
-    console.error(`Error reading deployment folders for ${network}:`, error);
-    return [];
   }
 }
